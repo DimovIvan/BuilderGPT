@@ -14,6 +14,7 @@ from cynia_agents.component_base import BaseComponent
 from cynia_agents.utils import LLM
 from . import core
 from .app.preview import PreviewOptions, build_preview
+from .schem_converter import convert_schem_file_to_legacy
 
 class BuilderGPTComponent(BaseComponent):
     name = "BuilderGPT"
@@ -176,6 +177,56 @@ class BuilderGPTComponent(BaseComponent):
             BuilderGPTComponent._viewer_template = template
         return BuilderGPTComponent._viewer_template
 
+    def _render_converter_ui(self) -> None:
+        st.divider()
+        st.markdown("**Convert existing .schem to Minecraft 1.7.10 .schematic**")
+        uploaded_schem = st.file_uploader(
+            "Upload a Sponge .schem file to convert",
+            type=["schem"],
+            key="schem_to_legacy_converter",
+            help="Converts Sponge .schem files into old MCEdit .schematic files for WorldEdit/Schematica on Minecraft 1.7.10",
+        )
+
+        if uploaded_schem is None:
+            return
+
+        if st.button("Convert to 1.7.10 .schematic", key="convert_schem_to_legacy"):
+            try:
+                input_dir = os.path.join("temp_uploads", "convert")
+                output_dir = os.path.join("generated", "converted")
+                os.makedirs(input_dir, exist_ok=True)
+                os.makedirs(output_dir, exist_ok=True)
+
+                base_name = os.path.splitext(uploaded_schem.name)[0]
+                input_path = os.path.join(input_dir, uploaded_schem.name)
+                output_path = os.path.join(output_dir, base_name + "-1.7.10.schematic")
+
+                with open(input_path, "wb") as f:
+                    f.write(uploaded_schem.getbuffer())
+
+                convert_schem_file_to_legacy(input_path, output_path)
+
+                artifact_manager.write_artifact(
+                    self.name,
+                    output_path,
+                    f"Converted Minecraft 1.7.10 schematic: {uploaded_schem.name}",
+                    "schematic"
+                )
+
+                with open(output_path, "rb") as f:
+                    converted_bytes = f.read()
+
+                st.success(f"Converted file saved to {output_path} and added to Artifact Center")
+                st.download_button(
+                    "Download .schematic",
+                    converted_bytes,
+                    file_name=os.path.basename(output_path),
+                    mime="application/octet-stream",
+                    key="download_converted_schematic",
+                )
+            except Exception as exc:
+                st.error(f"Failed to convert .schem: {exc}")
+
     def render(self):
         st.title("BuilderGPT")
 
@@ -273,6 +324,8 @@ class BuilderGPTComponent(BaseComponent):
                     with st.spinner("Building preview from uploaded schematic..."):
                         self._render_preview(tmp_path, resource_pack_bytes, preview_options)
                     st.session_state["bgpt_last_schem_path"] = tmp_path
+
+            self._render_converter_ui()
 
         with button_row:
             # Generate button - only enabled if description is provided
