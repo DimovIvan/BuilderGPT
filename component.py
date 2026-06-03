@@ -54,6 +54,7 @@ class BuilderGPTComponent(BaseComponent):
         # Register artifact types (only once)
         if not BuilderGPTComponent._initialized:
             artifact_manager.register_artifact_type("schem")
+            artifact_manager.register_artifact_type("schematic")
             artifact_manager.register_artifact_type("mcfunction")
             BuilderGPTComponent._initialized = True
             BuilderGPTComponent._instance = self
@@ -61,7 +62,7 @@ class BuilderGPTComponent(BaseComponent):
     def generate(self, description, version, export_type, image_path=None, progress=None):
         # Build the new JS-based prompt
         from .core import format_version_for_prompt
-        human_version = format_version_for_prompt(version)
+        human_version = "1.7.10" if export_type == "schematic_1_7_10" else format_version_for_prompt(version)
         sys_prompt = (
             self.prompts["SYS_GEN"]
             .replace("%MINECRAFT_VERSION%", human_version)
@@ -104,6 +105,24 @@ class BuilderGPTComponent(BaseComponent):
                 path,
                 f"Minecraft schematic: {description[:50]}{'...' if len(description) > 50 else ''}",
                 "schem"
+            )
+        elif export_type == "schematic_1_7_10":
+            final_path = os.path.join("generated", name + ".schematic")
+            try:
+                if os.path.exists(result):
+                    os.replace(result, final_path)
+                else:
+                    with open(final_path, "wb"):
+                        pass
+            except Exception:
+                with open(final_path, "ab"):
+                    pass
+            path = final_path
+            artifact_manager.write_artifact(
+                self.name,
+                path,
+                f"Minecraft 1.7.10 schematic: {description[:50]}{'...' if len(description) > 50 else ''}",
+                "schematic"
             )
         else:
             # result is a temp mcfunction path; rename to final name
@@ -163,7 +182,10 @@ class BuilderGPTComponent(BaseComponent):
         # Game version and export type selection
         versions = [attr.name for attr in mcschematic.Version]
         version = st.selectbox("Game Version", versions)
-        export_type = st.radio("Export Type", ["schem", "mcfunction"])
+        export_type = st.radio("Export Type", ["schem", "schematic_1_7_10", "mcfunction"])
+
+        if export_type == "schematic_1_7_10":
+            st.info("Exports a legacy MCEdit .schematic file with Minecraft 1.7.10 numeric block IDs and metadata.")
 
         # Text input (required)
         description = st.text_area("Description", placeholder="Describe the structure you want to build...")
