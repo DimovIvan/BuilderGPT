@@ -19,7 +19,7 @@ from .schem_converter import convert_schem_file_to_legacy
 class BuilderGPTComponent(BaseComponent):
     name = "BuilderGPT"
     description = "Generate Minecraft structures"
-    version = "3.0.0"
+    version = "3.0.1"
     supported_framework_versions = ">=1.0.0"
     author_name = "CyniaAI Team"
     author_link = "https://github.com/CyniaAI/BuilderGPT"
@@ -39,7 +39,7 @@ class BuilderGPTComponent(BaseComponent):
                 self.block_id_list = BuilderGPTComponent._instance.block_id_list
                 return
         
-        self.llm = LLM()
+        self.llm = None
         with open(os.path.join(os.path.dirname(__file__), "prompts.json"), "r") as f:
             raw_prompts = json.load(f)
             # Convert list prompts to strings
@@ -60,9 +60,15 @@ class BuilderGPTComponent(BaseComponent):
             BuilderGPTComponent._initialized = True
             BuilderGPTComponent._instance = self
 
+    def _get_llm(self):
+        if self.llm is None:
+            self.llm = LLM()
+        return self.llm
+
     def generate(self, description, version, export_type, image_path=None, progress=None):
         # Build the new JS-based prompt
         from .core import format_version_for_prompt
+        llm = self._get_llm()
         human_version = "1.7.10" if export_type == "schematic_1_7_10" else format_version_for_prompt(version)
         sys_prompt = (
             self.prompts["SYS_GEN"]
@@ -78,9 +84,9 @@ class BuilderGPTComponent(BaseComponent):
         
         # Call LLM with optional image
         if image_path:
-            response = self.llm.ask(sys_prompt, user_prompt, image_path=image_path)
+            response = llm.ask(sys_prompt, user_prompt, image_path=image_path)
         else:
-            response = self.llm.ask(sys_prompt, user_prompt)
+            response = llm.ask(sys_prompt, user_prompt)
             
         if progress:
             progress.progress(0.6)
@@ -88,7 +94,7 @@ class BuilderGPTComponent(BaseComponent):
         if progress:
             progress.progress(0.8)
             
-        raw_name = self.llm.ask(self.prompts["SYS_GEN_NAME"], self.prompts["USR_GEN_NAME"].replace("%DESCRIPTION%", description))
+        raw_name = llm.ask(self.prompts["SYS_GEN_NAME"], self.prompts["USR_GEN_NAME"].replace("%DESCRIPTION%", description))
         name = f"{raw_name}-{uuid.uuid4()}"
         version_tag = core.input_version_to_mcs_tag(version)
         if not os.path.isdir("generated"):
@@ -250,6 +256,7 @@ class BuilderGPTComponent(BaseComponent):
         uploaded_file = st.file_uploader(
             "Upload an image for reference (optional)",
             type=['png', 'jpg', 'jpeg', 'gif', 'bmp'],
+            key="buildergpt_reference_image_upload",
             help="Upload an image to help the AI understand the structure you want to build"
         )
         
@@ -275,6 +282,7 @@ class BuilderGPTComponent(BaseComponent):
             resource_pack_file = st.file_uploader(
                 "Optional resource pack (.zip)",
                 type=["zip"],
+                key="buildergpt_resource_pack_upload",
                 help="Upload a resource pack to colourise the preview (optional)",
             )
             resource_pack_bytes = resource_pack_file.getvalue() if resource_pack_file else None
