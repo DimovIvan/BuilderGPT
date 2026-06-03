@@ -5,6 +5,7 @@ import mcschematic
 from typing import Dict, List, Optional, Tuple
 from cynia_agents.log_writer import logger
 from cynia_agents.utils import LLM
+from .legacy_schematic import write_legacy_schematic
 
 llm = LLM()
 
@@ -203,11 +204,48 @@ def _execute_js_build(code: str) -> List[Tuple[int, int, int, str]]:
     return out
 
 
+def _write_mcfunction(placements: List[Tuple[int, int, int, str]]) -> str:
+    if not os.path.isdir("generated"):
+        os.makedirs("generated")
+    path = os.path.join("generated", "temp.mcfunction")
+    with open(path, "w", encoding="utf-8") as f:
+        for (x, y, z, block) in placements:
+            f.write(f"setblock {x} {y} {z} {block}\n")
+    return path
+
+
+def _write_legacy_schematic_file(placements: List[Tuple[int, int, int, str]]) -> str:
+    if not os.path.isdir("generated"):
+        os.makedirs("generated")
+    path = os.path.join("generated", "temp.schematic")
+    return write_legacy_schematic(placements, path)
+
+
+def _json_to_placements(data: dict) -> List[Tuple[int, int, int, str]]:
+    placements: List[Tuple[int, int, int, str]] = []
+    for structure in data["structures"]:
+        block_id = structure["block"]
+        x = structure["x"]
+        y = structure["y"]
+        z = structure["z"]
+        if structure["type"] == "fill":
+            to_x = structure["toX"]
+            to_y = structure["toY"]
+            to_z = structure["toZ"]
+            for ix in range(x, to_x + 1):
+                for iy in range(y, to_y + 1):
+                    for iz in range(z, to_z + 1):
+                        placements.append((ix, iy, iz, block_id))
+        else:
+            placements.append((x, y, z, block_id))
+    return placements
+
+
 def text_to_schem(text: str, export_type: str = "schem"):
-    """Convert model output to a Minecraft schematic or mcfunction file.
+    """Convert model output to a Minecraft schematic, legacy schematic or mcfunction file.
 
     Supports both legacy JSON output and the new JS-in-<code> format.
-    Returns MCSchematic for 'schem' or file path for 'mcfunction'.
+    Returns MCSchematic for 'schem' or file path for 'mcfunction'/'schematic_1_7_10'.
     """
     # 1) Try JS path first. If <code> is present, we commit to this path.
     js_code = _extract_js_code(text)
@@ -220,13 +258,9 @@ def text_to_schem(text: str, export_type: str = "schem"):
                     schematic.setBlock((x, y, z), block)
                 return schematic
             elif export_type == "mcfunction":
-                if not os.path.isdir("generated"):
-                    os.makedirs("generated")
-                path = os.path.join("generated", "temp.mcfunction")
-                with open(path, "w", encoding="utf-8") as f:
-                    for (x, y, z, block) in placements:
-                        f.write(f"setblock {x} {y} {z} {block}\n")
-                return path
+                return _write_mcfunction(placements)
+            elif export_type == "schematic_1_7_10":
+                return _write_legacy_schematic_file(placements)
         except Exception as e:
             logger(f"text_to_schem(JS): failed with error: {e}")
             # If JS code was found but failed to execute, we stop and return None.
@@ -237,45 +271,16 @@ def text_to_schem(text: str, export_type: str = "schem"):
     try:
         data = json.loads(text)
         logger(f"text_to_schem(JSON): loaded JSON data")
+        placements = _json_to_placements(data)
         if export_type == "schem":
             schematic = mcschematic.MCSchematic()
-            for structure in data["structures"]:
-                block_id = structure["block"]
-                x = structure["x"]
-                y = structure["y"]
-                z = structure["z"]
-                if structure["type"] == "fill":
-                    to_x = structure["toX"]
-                    to_y = structure["toY"]
-                    to_z = structure["toZ"]
-                    for ix in range(x, to_x + 1):
-                        for iy in range(y, to_y + 1):
-                            for iz in range(z, to_z + 1):
-                                schematic.setBlock((ix, iy, iz), block_id)
-                else:
-                    schematic.setBlock((x, y, z), block_id)
+            for (x, y, z, block_id) in placements:
+                schematic.setBlock((x, y, z), block_id)
             return schematic
         elif export_type == "mcfunction":
-            if not os.path.isdir("generated"):
-                os.makedirs("generated")
-            path = os.path.join("generated", "temp.mcfunction")
-            with open(path, "w", encoding="utf-8") as f:
-                for structure in data["structures"]:
-                    block_id = structure["block"]
-                    x = structure["x"]
-                    y = structure["y"]
-                    z = structure["z"]
-                    if structure["type"] == "fill":
-                        to_x = structure["toX"]
-                        to_y = structure["toY"]
-                        to_z = structure["toZ"]
-                        for ix in range(x, to_x + 1):
-                            for iy in range(y, to_y + 1):
-                                for iz in range(z, to_z + 1):
-                                    f.write(f"setblock {ix} {iy} {iz} {block_id}\n")
-                    else:
-                        f.write(f"setblock {x} {y} {z} {block_id}\n")
-            return path
+            return _write_mcfunction(placements)
+        elif export_type == "schematic_1_7_10":
+            return _write_legacy_schematic_file(placements)
     except Exception as e:
         logger(f"text_to_schem(JSON): failed to parse JSON: {e}")
         return None
